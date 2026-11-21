@@ -96,11 +96,23 @@ curl -s -X POST http://localhost:8000/check \
 1. **解析与白名单校验**（`app/sql_parser.py`，基于 sqlglot）：越界语法拒绝。
 2. **z3 有界判定**（`app/z3check.py`）：两表各 0~3 行符号化，施加主键唯一、
    外键引用、int4 值域约束；WHERE 按 SQL 三值逻辑编码（`UNKNOWN` 被过滤）；
-   JOIN/LEFT JOIN 展开为符号行；结果多重集差异编码为"存在某元组值两侧计数
-   不同"。`UNSAT` 即界内等价，`SAT` 提取候选反例。
+   JOIN/LEFT JOIN 展开为符号行。结果多重集差异采用**计数映射编码**：每个
+   候选结果行按列位置打包为单个整数键（NULL 映射到 int4 值域外的哨兵，
+   打包在完整性约束下是单射），每侧把"键 → 出现次数"累积成 z3 数组
+   （每行一次条件 `Store`，未保留行不计数），两侧数组外延不等即存在差异。
+   不同 AST 节点数为 Θ(k·n)（k 为投影列数，n 为两侧候选行总数），固定
+   投影列数时随候选行总数线性增长（旧实现按候选行反复构造两侧计数，为
+   Θ(k·n²)，保留为 `method="pairwise"` 供对照）。`UNSAT` 即界内等价，
+   `SAT` 提取候选反例。
 3. **PostgreSQL 复现**（`app/verifier.py`）：候选反例在独立临时 schema 中
    建表、装载、实际执行两条查询并比较多重集；确认差异才报
    `NOT_EQUIVALENT`，否则报 `UNKNOWN`。
+
+公式规模基准（旧 vs 新编码的不同 AST 节点数，含 log-log 增长斜率）：
+
+```bash
+python scripts/benchmark_formula_size.py
+```
 
 ## 配置
 
